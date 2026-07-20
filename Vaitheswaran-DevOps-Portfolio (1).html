@@ -1,0 +1,621 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Vaitheswaran — traceroute to a DevOps engineer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#0C0A07;
+    --panel:#161209;
+    --panel-2:#100D08;
+    --line:#332A18;
+    --fog:#9C9282;
+    --paper:#F1E9D8;
+    --amber:#E8A33D;
+    --amber-bright:#FFC46B;
+    --amber-dim:#5C4620;
+    --teal:#5FC9BE;
+    --radius:8px;
+    --maxw:960px;
+    --rail-w:64px;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  html{scroll-behavior:smooth;}
+  body{
+    background:var(--bg);
+    color:var(--paper);
+    font-family:'Inter',sans-serif;
+    line-height:1.6;
+    -webkit-font-smoothing:antialiased;
+    position:relative;
+  }
+  /* CRT texture: faint scanlines + vignette, ties to the amber-terminal concept */
+  body::before{
+    content:"";position:fixed;inset:0;pointer-events:none;z-index:5;
+    background:repeating-linear-gradient(
+      to bottom, rgba(0,0,0,0) 0px, rgba(0,0,0,0) 2px,
+      rgba(0,0,0,0.10) 3px, rgba(0,0,0,0) 4px
+    );
+    mix-blend-mode:multiply;
+  }
+  body::after{
+    content:"";position:fixed;inset:0;pointer-events:none;z-index:4;
+    background:radial-gradient(ellipse at center, rgba(0,0,0,0) 55%, rgba(0,0,0,0.55) 100%);
+  }
+  a{color:inherit;}
+  .mono{font-family:'JetBrains Mono',monospace;}
+  h1,h2,h3{font-family:'Space Grotesk',sans-serif;letter-spacing:-0.01em;}
+
+  .layout{display:flex;position:relative;z-index:1;}
+
+  /* ---------- rail: the trace path ---------- */
+  .rail{
+    width:var(--rail-w);flex:0 0 var(--rail-w);
+    position:sticky;top:0;align-self:flex-start;height:100vh;
+    display:flex;flex-direction:column;align-items:center;
+    padding:28px 0;
+  }
+  .rail-line{
+    position:absolute;top:28px;bottom:28px;left:50%;width:1px;
+    background:linear-gradient(var(--line), var(--line));
+    transform:translateX(-50%);
+  }
+  .rail-hops{display:flex;flex-direction:column;justify-content:space-between;height:100%;position:relative;}
+  .rail-hop{
+    width:26px;height:26px;border-radius:50%;
+    border:1px solid var(--line);background:var(--panel-2);
+    display:flex;align-items:center;justify-content:center;
+    font-family:'JetBrains Mono',monospace;font-size:9px;color:var(--fog);
+    cursor:pointer;text-decoration:none;transition:all .25s;
+  }
+  .rail-hop.seen{border-color:var(--amber);color:var(--amber);box-shadow:0 0 10px rgba(232,163,61,0.35);}
+  @media (max-width:900px){.rail{display:none;}}
+
+  .content{flex:1;min-width:0;}
+  .wrap{max-width:var(--maxw);margin:0 auto;padding:0 28px;}
+
+  /* ---------- top status bar ---------- */
+  .statusbar{
+    border-bottom:1px solid var(--line);
+    background:rgba(16,13,8,0.75);backdrop-filter:blur(6px);
+    position:sticky;top:0;z-index:10;
+  }
+  .statusbar .wrap{display:flex;align-items:center;justify-content:space-between;height:50px;}
+  .statusbar .brand{font-family:'JetBrains Mono',monospace;font-size:12.5px;color:var(--fog);display:flex;align-items:center;gap:8px;}
+  .dot{width:6px;height:6px;border-radius:50%;background:var(--amber);box-shadow:0 0 8px var(--amber);}
+  @media (prefers-reduced-motion:no-preference){.dot{animation:pulse 2.6s ease-in-out infinite;}}
+  @keyframes pulse{0%,100%{opacity:1;}50%{opacity:0.3;}}
+  .navlinks{display:flex;gap:20px;font-size:12.5px;color:var(--fog);}
+  .navlinks a{text-decoration:none;transition:color .15s;}
+  .navlinks a:hover{color:var(--amber);}
+  @media (max-width:640px){.navlinks{display:none;}}
+
+  /* ---------- hero / terminal ---------- */
+  .hero{padding:72px 0 56px;}
+  .hero h1{font-size:clamp(32px,5.4vw,54px);font-weight:700;line-height:1.08;max-width:760px;}
+  .hero h1 span{color:var(--amber);}
+  .hero p.lede{max-width:540px;color:var(--fog);font-size:16.5px;margin-top:18px;}
+
+  .terminal{
+    margin-top:34px;border:1px solid var(--line);border-radius:var(--radius);
+    background:var(--panel-2);overflow:hidden;
+  }
+  .terminal .bar{
+    display:flex;align-items:center;gap:6px;padding:9px 14px;border-bottom:1px solid var(--line);
+    font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--fog);
+  }
+  .terminal .bar .tf{width:8px;height:8px;border-radius:50%;background:var(--line);}
+  .terminal pre{
+    padding:18px 20px 4px;font-family:'JetBrains Mono',monospace;font-size:12.6px;
+    color:#CFC6AE;white-space:pre-wrap;margin:0;
+  }
+  .terminal .prompt{color:var(--teal);}
+  .terminal .hopnum{color:var(--amber);}
+  .terminal .reached{color:var(--amber-bright);font-weight:600;}
+  .terminal .cmd{color:var(--amber-bright);}
+  .terminal .err{color:#D98686;}
+  .terminal .hint{color:var(--fog);}
+  .caret{display:inline-block;width:7px;height:14px;background:var(--amber);vertical-align:middle;margin-left:2px;}
+  @media (prefers-reduced-motion:no-preference){.caret{animation:blink 1s steps(1) infinite;}}
+  @keyframes blink{50%{opacity:0;}}
+  #term-scroll{max-height:340px;overflow-y:auto;}
+  #term-scroll::-webkit-scrollbar{width:8px;}
+  #term-scroll::-webkit-scrollbar-thumb{background:var(--line);border-radius:4px;}
+  .term-inputline{
+    display:flex;align-items:center;gap:8px;padding:0 20px 16px;font-family:'JetBrains Mono',monospace;font-size:12.6px;
+  }
+  .term-inputline .p{color:var(--teal);white-space:nowrap;}
+  .term-inputline input{
+    flex:1;background:transparent;border:none;outline:none;color:var(--paper);
+    font-family:'JetBrains Mono',monospace;font-size:12.6px;caret-color:var(--amber);
+  }
+  .term-inputline input::placeholder{color:#5A5140;}
+  .terminal-foot{padding:8px 20px 14px;border-top:1px solid var(--line);font-family:'JetBrains Mono',monospace;font-size:10.5px;color:var(--fog);}
+
+  .contact-row{display:flex;flex-wrap:wrap;gap:12px;margin-top:28px;}
+  .btn{
+    font-family:'JetBrains Mono',monospace;font-size:12.5px;padding:10px 16px;border-radius:6px;
+    text-decoration:none;border:1px solid var(--line);color:var(--paper);
+    transition:border-color .15s,color .15s,transform .15s;display:inline-flex;align-items:center;gap:8px;
+  }
+  .btn:hover{border-color:var(--amber);color:var(--amber);transform:translateY(-1px);}
+  .btn.primary{background:var(--amber);color:#1B1204;border-color:var(--amber);font-weight:600;}
+  .btn.primary:hover{color:#1B1204;opacity:0.9;}
+
+  /* ---------- section shell ---------- */
+  section{padding:56px 0;border-top:1px solid var(--line);}
+  .sec-head{display:flex;align-items:baseline;gap:12px;margin-bottom:10px;}
+  .sec-head .tag{font-family:'JetBrains Mono',monospace;font-size:11.5px;color:var(--amber);white-space:nowrap;}
+  .sec-head h2{font-size:24px;}
+  .sec-rtt{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--fog);margin-bottom:26px;}
+
+  /* ---------- summary ---------- */
+  #summary p{max-width:640px;color:var(--fog);font-size:15.5px;}
+  #summary p + p{margin-top:12px;}
+
+  /* ---------- experience: company block with role hops ---------- */
+  .company-block{border:1px solid var(--line);border-radius:var(--radius);background:var(--panel);margin-bottom:18px;overflow:hidden;}
+  .company-head{padding:18px 22px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:8px;}
+  .company-head h3{font-size:17px;}
+  .company-head .loc{color:var(--fog);font-size:13px;}
+  .role-row{padding:20px 22px;position:relative;}
+  .role-row + .role-row{border-top:1px dashed var(--line);}
+  .role-row::before{
+    content:"↳";position:absolute;left:22px;top:20px;color:var(--amber);font-family:'JetBrains Mono',monospace;font-size:13px;
+  }
+  .role-row-inner{padding-left:22px;}
+  .role-top{display:flex;flex-wrap:wrap;justify-content:space-between;gap:8px;align-items:baseline;}
+  .role-top h4{font-family:'Space Grotesk',sans-serif;font-size:15.5px;}
+  .timestamp{font-family:'JetBrains Mono',monospace;font-size:11.5px;color:var(--fog);}
+  .badge{
+    font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:0.04em;
+    padding:2px 8px;border-radius:20px;text-transform:uppercase;white-space:nowrap;margin-left:8px;
+  }
+  .badge.active{color:var(--amber);border:1px solid var(--amber-dim);background:rgba(232,163,61,0.08);}
+  .badge.closed{color:var(--fog);border:1px solid var(--line);background:transparent;}
+  .role-row ul{margin-top:12px;padding-left:16px;font-size:14px;}
+  .role-row li{margin-bottom:6px;color:#CBBE9F;}
+  .role-row li::marker{color:var(--amber);}
+  .promo-note{
+    font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--teal);
+    padding:10px 22px;background:rgba(95,201,190,0.05);border-top:1px dashed var(--line);
+  }
+
+  .single-block{border:1px solid var(--line);border-radius:var(--radius);background:var(--panel);padding:20px 22px;margin-bottom:14px;}
+  .single-block .role-top h4{font-size:15.5px;}
+  .single-block .org{color:var(--fog);font-size:13px;margin-top:2px;}
+  .single-block ul{margin-top:12px;padding-left:16px;font-size:14px;}
+  .single-block li{color:#CBBE9F;margin-bottom:6px;}
+  .single-block li::marker{color:var(--amber);}
+
+  /* ---------- skills routing table ---------- */
+  .rtable{width:100%;border-collapse:collapse;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;}
+  .rtable thead th{
+    font-family:'JetBrains Mono',monospace;font-size:10.5px;letter-spacing:0.06em;text-transform:uppercase;
+    color:var(--fog);text-align:left;background:var(--panel-2);padding:11px 16px;border-bottom:1px solid var(--line);
+  }
+  .rtable tbody td{padding:13px 16px;border-bottom:1px solid var(--line);font-size:13.5px;vertical-align:top;}
+  .rtable tbody tr:last-child td{border-bottom:none;}
+  .rtable tbody tr:hover{background:rgba(232,163,61,0.03);}
+  .rtable td.dest{font-family:'Space Grotesk',sans-serif;font-weight:600;}
+  .rtable td.iface{color:#CBBE9F;}
+  .metric{font-family:'JetBrains Mono',monospace;font-size:10.5px;padding:2px 9px;border-radius:20px;}
+  .metric.core{color:var(--amber);border:1px solid var(--amber-dim);}
+  .metric.working{color:var(--teal);border:1px solid rgba(95,201,190,0.4);}
+  .table-scroll{overflow-x:auto;}
+
+  /* ---------- projects ---------- */
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:14px;}
+  .card{border:1px solid var(--line);border-radius:var(--radius);background:var(--panel);padding:18px;display:flex;flex-direction:column;gap:9px;}
+  .card-top{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;}
+  .card h3{font-size:15px;}
+  .status-pill{display:flex;align-items:center;gap:6px;font-family:'JetBrains Mono',monospace;font-size:9.5px;color:var(--amber);white-space:nowrap;}
+  .status-pill .dot{width:5px;height:5px;}
+  .card p{color:var(--fog);font-size:13px;}
+
+  /* ---------- certifications ---------- */
+  .cert-row{display:flex;flex-wrap:wrap;gap:10px;}
+  .cert{border:1px solid var(--line);border-radius:var(--radius);background:var(--panel);padding:13px 16px;font-size:13px;display:flex;align-items:center;gap:9px;min-width:210px;flex:1;}
+  .cert .mark{color:var(--amber);font-family:'JetBrains Mono',monospace;font-size:11px;}
+
+  /* ---------- education ---------- */
+  #education .edu-block{border:1px solid var(--line);border-radius:var(--radius);background:var(--panel);padding:20px 22px;}
+  #education h3{font-size:16px;margin-bottom:4px;}
+  #education .meta{color:var(--fog);font-size:13px;}
+
+  /* ---------- footer / destination ---------- */
+  footer{padding:52px 0 40px;border-top:1px solid var(--line);}
+  footer h2{font-size:22px;margin-bottom:10px;}
+  footer p{color:var(--fog);max-width:460px;font-size:14.5px;margin-bottom:24px;}
+  .footer-links{display:flex;flex-wrap:wrap;gap:10px;}
+  .foot-meta{margin-top:36px;padding-top:18px;border-top:1px solid var(--line);display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px;font-family:'JetBrains Mono',monospace;font-size:10.5px;color:var(--fog);}
+
+  @media (max-width:640px){
+    .hero{padding:56px 0 40px;}
+    section{padding:44px 0;}
+  }
+  :focus-visible{outline:2px solid var(--amber);outline-offset:2px;}
+</style>
+</head>
+<body>
+
+<div class="layout">
+  <nav class="rail" aria-hidden="true">
+    <div class="rail-line"></div>
+    <div class="rail-hops">
+      <a class="rail-hop" data-target="hero" href="#top">00</a>
+      <a class="rail-hop" data-target="summary" href="#summary">01</a>
+      <a class="rail-hop" data-target="experience" href="#experience">02</a>
+      <a class="rail-hop" data-target="skills" href="#skills">03</a>
+      <a class="rail-hop" data-target="projects" href="#projects">04</a>
+      <a class="rail-hop" data-target="certifications" href="#certifications">05</a>
+      <a class="rail-hop" data-target="education" href="#education">06</a>
+      <a class="rail-hop" data-target="contact" href="#contact">07</a>
+    </div>
+  </nav>
+
+  <div class="content">
+    <div class="statusbar">
+      <div class="wrap">
+        <div class="brand"><span class="dot"></span> vaitheswaran // trace in progress // 7 hops to destination</div>
+        <nav class="navlinks">
+          <a href="#experience">experience</a>
+          <a href="#skills">skills</a>
+          <a href="#projects">projects</a>
+          <a href="#certifications">certifications</a>
+          <a href="#contact">contact</a>
+        </nav>
+      </div>
+    </div>
+
+    <header class="hero wrap" id="hero"><a id="top"></a>
+      <h1>Every good engineer<br>started as <span>hop one.</span></h1>
+      <p class="lede">DevOps & Cloud Infrastructure Engineer — AWS, Terraform, Docker, and enterprise Cisco Meraki networks. This page traces the route: telecom intern, to support engineer, to the person keeping a 24,000 sq ft office network at 99.5%+ uptime.</p>
+
+      <div class="terminal" id="terminal">
+        <div class="bar"><span class="tf"></span><span class="tf"></span><span class="tf"></span>&nbsp; visitor@vaitheswaran — interactive</div>
+        <div id="term-scroll"><pre id="trace-output"></pre></div>
+        <div class="term-inputline">
+          <span class="p">visitor@vaitheswaran:~$</span>
+          <input id="term-input" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="type 'help' and press enter" disabled aria-label="Interactive terminal command input">
+        </div>
+        <div class="terminal-foot">try: whoami · experience · skills · ping kissflow · sudo hire-me</div>
+      </div>
+
+      <div class="contact-row">
+        <a class="btn primary" href="mailto:vaithyx5@gmail.com">Email — vaithyx5@gmail.com</a>
+        <a class="btn" href="https://www.linkedin.com/in/vaitheswaran-s-62434b248/" target="_blank" rel="noopener">LinkedIn ↗</a>
+        <a class="btn" href="https://github.com/Vaitheswaran05" target="_blank" rel="noopener">GitHub ↗</a>
+        <a class="btn" href="tel:7449102268">7449102268</a>
+      </div>
+    </header>
+
+    <section id="summary">
+      <div class="wrap">
+        <div class="sec-head"><span class="tag">hop 01</span><h2>Summary</h2></div>
+        <div class="sec-rtt">rtt 0.9ms — origin node</div>
+        <p>Infrastructure and cloud engineer with hands-on experience across enterprise networking and cloud-integrated environments — configuring VLANs, routing, VPNs and network security on Cisco Meraki and multi-vendor hardware.</p>
+        <p>Comfortable moving between AWS cloud networking, infrastructure-as-code with Terraform, and containerized deployments with Docker. Strong on troubleshooting, incident management and driving reliability through automation and monitoring.</p>
+      </div>
+    </section>
+
+    <section id="experience">
+      <div class="wrap">
+        <div class="sec-head"><span class="tag">hop 02</span><h2>Experience</h2></div>
+        <div class="sec-rtt">rtt 4.2ms → 11.3ms — two hops, one network</div>
+
+        <div class="single-block">
+          <div class="role-top">
+            <h4>Telecommunication & Networking Intern <span class="badge closed">closed</span></h4>
+            <span class="timestamp">2023</span>
+          </div>
+          <div class="org">Bharat Sanchar Nigam Limited (BSNL)</div>
+          <ul>
+            <li>Gained hands-on exposure to telecom infrastructure, IP networking, routing and switching.</li>
+          </ul>
+        </div>
+
+        <div class="company-block">
+          <div class="company-head">
+            <h3>Datalogics India Pvt Ltd</h3>
+            <span class="loc">Chennai, IN — on-site at client Kissflow Inc</span>
+          </div>
+
+          <div class="role-row">
+            <div class="role-row-inner">
+              <div class="role-top">
+                <h4>Technical Support Engineer <span class="badge closed">closed</span></h4>
+                <span class="timestamp">Feb 2024 → Jul 2024</span>
+              </div>
+              <ul>
+                <li>Supported end-user hardware, macOS/Linux environments and network connectivity.</li>
+                <li>Diagnosed hardware issues, performance bottlenecks and OS-level failures.</li>
+                <li>Troubleshot DNS, connectivity and application-level issues; supported monitoring and incident response workflows.</li>
+              </ul>
+            </div>
+          </div>
+
+          <div class="role-row">
+            <div class="role-row-inner">
+              <div class="role-top">
+                <h4>Residential Engineer <span class="badge active">active</span></h4>
+                <span class="timestamp">Jul 2024 → present</span>
+              </div>
+              <ul>
+                <li>On-site point of contact for enterprise network infrastructure on Cisco Meraki, including VLAN, routing and wireless configuration.</li>
+                <li>Enforce network security through ACLs, firewalls and segmentation; manage Site-to-Site and Client VPN connectivity.</li>
+                <li>Diagnose and resolve L2/L3 issues — latency, outages, packet loss — holding uptime at 99.5%+ SLA.</li>
+                <li>Support AWS VPC routing, security groups and access control; monitor infrastructure health via CloudWatch.</li>
+                <li>Perform Linux server administration and lead incident RCA and reliability improvements with internal IT teams.</li>
+              </ul>
+            </div>
+          </div>
+
+          <div class="promo-note">↑ promoted from Technical Support Engineer to Residential Engineer within the same company</div>
+        </div>
+      </div>
+    </section>
+
+    <section id="skills">
+      <div class="wrap">
+        <div class="sec-head"><span class="tag">hop 03</span><h2>Skills — routing table</h2></div>
+        <div class="sec-rtt">rtt 2.1ms — five active routes</div>
+        <div class="table-scroll">
+          <table class="rtable">
+            <thead><tr><th>Destination (domain)</th><th>Interface (tools)</th><th>Metric</th></tr></thead>
+            <tbody>
+              <tr><td class="dest">Cloud & IaC</td><td class="iface">AWS — EC2, VPC, Subnets, Route Tables, NAT Gateway, ALB · Terraform · CloudFormation</td><td><span class="metric core">core</span></td></tr>
+              <tr><td class="dest">Networking & Security</td><td class="iface">Cisco Meraki, Aruba, Netgear · VLAN, Subnetting, Routing & Switching (L2/L3), STP, DHCP, DNS, VPN, ACLs, Firewalls</td><td><span class="metric core">core</span></td></tr>
+              <tr><td class="dest">Containers & CI/CD</td><td class="iface">Docker, GitHub Actions, Jenkins · Kubernetes (Pods, Services, ConfigMaps)</td><td><span class="metric working">working</span></td></tr>
+              <tr><td class="dest">Monitoring & Observability</td><td class="iface">CloudWatch, Prometheus, Grafana</td><td><span class="metric working">working</span></td></tr>
+              <tr><td class="dest">Scripting & Systems</td><td class="iface">Bash, Python · Linux (Ubuntu, Amazon Linux)</td><td><span class="metric core">core</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <section id="projects">
+      <div class="wrap">
+        <div class="sec-head"><span class="tag">hop 04</span><h2>Deployed projects</h2></div>
+        <div class="sec-rtt">rtt 6.8ms — all services reporting healthy</div>
+        <div class="grid">
+          <div class="card"><div class="card-top"><h3>AWS Cloud Network Architecture</h3><span class="status-pill"><span class="dot"></span>live</span></div><p>Designed a VPC with public/private subnets, NAT Gateway and Internet Gateway; configured route tables, traffic flow and security groups.</p></div>
+          <div class="card"><div class="card-top"><h3>Infrastructure as Code</h3><span class="status-pill"><span class="dot"></span>live</span></div><p>Provisioned AWS infrastructure with Terraform using modular configuration, state management and reusable design patterns.</p></div>
+          <div class="card"><div class="card-top"><h3>CI/CD Pipeline</h3><span class="status-pill"><span class="dot"></span>live</span></div><p>Built pipelines with GitHub Actions for automated build and deployment workflows.</p></div>
+          <div class="card"><div class="card-top"><h3>Containerization</h3><span class="status-pill"><span class="dot"></span>live</span></div><p>Built and deployed containerized applications, with a working understanding of Kubernetes Pods, Services and ConfigMaps.</p></div>
+          <div class="card"><div class="card-top"><h3>Monitoring & Observability</h3><span class="status-pill"><span class="dot"></span>live</span></div><p>Implemented monitoring and alerting using CloudWatch, Prometheus and Grafana.</p></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="certifications">
+      <div class="wrap">
+        <div class="sec-head"><span class="tag">hop 05</span><h2>Certifications</h2></div>
+        <div class="sec-rtt">rtt 3.4ms — signed and verified</div>
+        <div class="cert-row">
+          <div class="cert"><span class="mark">✓</span> CCNA — Network Technician Essentials</div>
+          <div class="cert"><span class="mark">✓</span> Cisco Meraki Network Engineer</div>
+          <div class="cert"><span class="mark">✓</span> Certified DevOps Professional — GUVI × HCL</div>
+        </div>
+      </div>
+    </section>
+
+    <section id="education">
+      <div class="wrap">
+        <div class="sec-head"><span class="tag">hop 06</span><h2>Education</h2></div>
+        <div class="sec-rtt">rtt 1.6ms — where the route began</div>
+        <div class="edu-block">
+          <h3>B.E — Medical Electronics</h3>
+          <div class="meta">Saveetha Engineering College, Chennai · 2020 – 2024 · First Class with Distinction</div>
+        </div>
+      </div>
+    </section>
+
+    <footer id="contact">
+      <div class="wrap">
+        <div class="sec-head"><span class="tag">hop 07</span><h2>Destination reached</h2></div>
+        <p>Open to DevOps and Cloud Infrastructure Engineer roles. Reach out directly, or find the work on GitHub and LinkedIn.</p>
+        <div class="footer-links">
+          <a class="btn primary" href="mailto:vaithyx5@gmail.com">Email me</a>
+          <a class="btn" href="https://www.linkedin.com/in/vaitheswaran-s-62434b248/" target="_blank" rel="noopener">LinkedIn ↗</a>
+          <a class="btn" href="https://github.com/Vaitheswaran05" target="_blank" rel="noopener">GitHub ↗</a>
+          <a class="btn" href="tel:7449102268">Call — 7449102268</a>
+        </div>
+        <div class="foot-meta">
+          <span>Chennai, India</span>
+          <span>connection secure — 0% packet loss</span>
+        </div>
+      </div>
+    </footer>
+  </div>
+</div>
+
+<script>
+  // ---------- boot sequence (traceroute) ----------
+  const bootLines = [
+    "$ traceroute career.path",
+    " 1  you                                  0.4 ms",
+    " 2  bsnl-telecom-intern      [2023]       4.2 ms",
+    " 3  datalogics-support       [2024]       7.8 ms",
+    " 4  datalogics-residential   [2024–now]   11.3 ms",
+    " 5  vaitheswaran.devops                   reached — connection secure"
+  ];
+  const out = document.getElementById('trace-output');
+  const scrollBox = document.getElementById('term-scroll');
+  const input = document.getElementById('term-input');
+  const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  function colorizeBoot(line, idx){
+    if(idx===0) return `<span class="prompt">${line}</span>`;
+    if(idx===bootLines.length-1) return line.replace('reached — connection secure', '<span class="reached">reached — connection secure</span>');
+    return line.replace(/^(\s*\d+)/, '<span class="hopnum">$1</span>');
+  }
+
+  function appendRaw(html){
+    out.innerHTML += (out.innerHTML ? '\n' : '') + html;
+    scrollBox.scrollTop = scrollBox.scrollHeight;
+  }
+
+  function enableShell(){
+    appendRaw('');
+    appendRaw('<span class="hint">type \'help\' to explore this shell, or just scroll to browse.</span>');
+    input.disabled = false;
+    input.focus();
+  }
+
+  function runBoot(){
+    if(reduced){
+      out.innerHTML = bootLines.map(colorizeBoot).join('\n');
+      enableShell();
+      return;
+    }
+    let li = 0, ci = 0, buffer = [];
+    function typeNext(){
+      if(li >= bootLines.length){ out.innerHTML = bootLines.map(colorizeBoot).join('\n'); enableShell(); return; }
+      const full = bootLines[li];
+      ci++;
+      out.innerHTML = buffer.concat(colorizeBoot(full.slice(0, ci), li)).join('\n') + '<span class="caret"></span>';
+      scrollBox.scrollTop = scrollBox.scrollHeight;
+      if(ci < full.length){ setTimeout(typeNext, 10); }
+      else { buffer.push(colorizeBoot(full, li)); li++; ci = 0; setTimeout(typeNext, 220); }
+    }
+    typeNext();
+  }
+  runBoot();
+
+  // ---------- interactive shell ----------
+  function scrollToSection(id){
+    const el = document.getElementById(id);
+    if(el) setTimeout(() => el.scrollIntoView({behavior: reduced ? 'auto' : 'smooth', block:'start'}), 300);
+  }
+
+  const commands = {
+    help: () => [
+      "available commands:",
+      "  whoami          who you're talking to",
+      "  summary         career summary",
+      "  experience      work history (BSNL → Datalogics)",
+      "  skills          routing table of tools & domains",
+      "  projects        deployed project log",
+      "  certs           certifications on file",
+      "  education       academic background",
+      "  contact         how to reach me",
+      "  ping &lt;name&gt;     check a company's uptime",
+      "  sudo hire-me    initiate hiring sequence",
+      "  ls              list available sections",
+      "  clear           clear this terminal",
+      "  traceroute      replay the boot trace"
+    ],
+    whoami: () => [
+      "vaitheswaran",
+      "DevOps & Cloud Infrastructure Engineer — Chennai, IN",
+      "currently: Residential Engineer @ Datalogics India Pvt Ltd (client: Kissflow Inc)"
+    ],
+    summary: () => { scrollToSection('summary'); return ["infrastructure + cloud engineer — Meraki networking, AWS, Terraform, Docker.", "full summary ↓ scrolling..."]; },
+    experience: () => { scrollToSection('experience'); return ["2023 BSNL (intern) → 2024 Datalogics (support) → 2024–now Datalogics (residential, promoted)", "full log ↓ scrolling..."]; },
+    skills: () => { scrollToSection('skills'); return ["core: AWS · Terraform · Meraki networking · Linux/Bash", "working: Docker · CI/CD · Prometheus/Grafana", "routing table ↓ scrolling..."]; },
+    projects: () => { scrollToSection('projects'); return ["5 services reporting healthy: VPC architecture, IaC, CI/CD, containers, monitoring.", "project log ↓ scrolling..."]; },
+    certs: () => { scrollToSection('certifications'); return ["CCNA · Cisco Meraki Network Engineer · Certified DevOps Professional (GUVI × HCL)"]; },
+    certifications: () => commands.certs(),
+    education: () => { scrollToSection('education'); return ["B.E — Medical Electronics, Saveetha Engineering College, 2020–2024, First Class with Distinction"]; },
+    contact: () => { scrollToSection('contact'); return ["email: vaithyx5@gmail.com", "phone: 7449102268", "linkedin: linkedin.com/in/vaitheswaran-s-62434b248", "github: github.com/Vaitheswaran05"]; },
+    ls: () => ["summary.md  experience.log  skills.tbl  projects/  certs.pem  education.log  contact.sh"],
+    clear: () => { out.innerHTML = ''; return null; },
+    traceroute: () => { out.innerHTML = ''; runBoot(); return null; }
+  };
+
+  function handlePing(arg){
+    const known = {
+      kissflow: "64 bytes from kissflow.io: icmp_seq=1 ttl=64 time=0.4ms — on-site now, 99.5%+ uptime SLA",
+      recruiter: "64 bytes from recruiter: icmp_seq=1 ttl=64 time=12ms — reply within 24h, guaranteed",
+      datalogics: "64 bytes from datalogics.in: icmp_seq=1 ttl=64 time=1.1ms — active engagement since 2024"
+    };
+    if(!arg) return ["usage: ping &lt;name&gt; — try 'ping kissflow'"];
+    const key = arg.toLowerCase();
+    return [known[key] || `ping: ${arg}: no known host — try 'ping kissflow'`];
+  }
+
+  function handleCat(arg){
+    const map = { 'summary.md':'summary', 'experience.log':'experience', 'skills.tbl':'skills', 'certs.pem':'certs', 'education.log':'education', 'contact.sh':'contact' };
+    const key = map[arg];
+    if(key) return commands[key]();
+    return [`cat: ${arg || ''}: no such file — try 'ls'`];
+  }
+
+  const history = [];
+  let hIndex = -1;
+
+  function execute(raw){
+    const trimmed = raw.trim();
+    appendRaw(`<span class="prompt">visitor@vaitheswaran:~$</span> <span class="cmd">${trimmed.replace(/</g,'&lt;')}</span>`);
+    if(!trimmed){ scrollBox.scrollTop = scrollBox.scrollHeight; return; }
+
+    history.push(trimmed); hIndex = history.length;
+    const parts = trimmed.split(/\s+/);
+    const cmd = parts[0].toLowerCase();
+    const arg = parts.slice(1).join(' ');
+    let result;
+
+    if(cmd === 'sudo' && arg.toLowerCase() === 'hire-me'){
+      result = ["[sudo] password for interviewer: ********", "✓ permission granted — redirecting to /contact"];
+      scrollToSection('contact');
+    } else if(cmd === 'ping'){
+      result = handlePing(arg);
+    } else if(cmd === 'cat'){
+      result = handleCat(arg);
+    } else if(commands[cmd]){
+      result = commands[cmd]();
+    } else {
+      result = [`<span class="err">command not found: ${cmd}</span> — type 'help'`];
+    }
+
+    if(result) appendRaw(result.join('\n'));
+    scrollBox.scrollTop = scrollBox.scrollHeight;
+  }
+
+  input.addEventListener('keydown', (e) => {
+    if(e.key === 'Enter'){
+      const val = input.value;
+      input.value = '';
+      execute(val);
+    } else if(e.key === 'ArrowUp'){
+      e.preventDefault();
+      if(hIndex > 0){ hIndex--; input.value = history[hIndex] || ''; }
+    } else if(e.key === 'ArrowDown'){
+      e.preventDefault();
+      if(hIndex < history.length - 1){ hIndex++; input.value = history[hIndex] || ''; }
+      else { hIndex = history.length; input.value = ''; }
+    } else if(e.key === 'Tab'){
+      e.preventDefault();
+      const partial = input.value.toLowerCase();
+      if(partial){
+        const match = Object.keys(commands).find(c => c.startsWith(partial));
+        if(match) input.value = match;
+      }
+    }
+  });
+  document.getElementById('terminal').addEventListener('click', () => input.focus());
+
+  // ---------- rail hop highlighting ----------
+  const hops = document.querySelectorAll('.rail-hop');
+  const map = {};
+  hops.forEach(h => map[h.dataset.target] = h);
+  const targets = ['hero','summary','experience','skills','projects','certifications','education','contact'];
+  const obs = new IntersectionObserver((entries) => {
+    entries.forEach(e => {
+      if(e.isIntersecting && map[e.target.id]){
+        map[e.target.id].classList.add('seen');
+      }
+    });
+  }, {rootMargin:'-40% 0px -40% 0px'});
+  targets.forEach(id => {
+    const el = document.getElementById(id);
+    if(el) obs.observe(el);
+  });
+</script>
+</body>
+</html>
